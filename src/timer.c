@@ -5,6 +5,7 @@
 #define PPI_VTIMER  27
 
 static uint64_t timer_interval;
+static uint64_t next_deadline;
 
 static inline uint64_t read_cntfrq(void)
 {
@@ -40,13 +41,16 @@ void vSetupTickInterrupt(void)
 {
     gic_enable_irq(PPI_VTIMER);
 
-    uint64_t now = read_cntvct();
-    write_cntv_cval(now + timer_interval);
+    next_deadline = read_cntvct() + timer_interval;
+    write_cntv_cval(next_deadline);
     write_cntv_ctl(1);
 }
 
 void vClearTickInterrupt(void)
 {
+    next_deadline += timer_interval;
     uint64_t now = read_cntvct();
-    write_cntv_cval(now + timer_interval);
+    if ((int64_t)(next_deadline - now) <= 0)
+        next_deadline = now + timer_interval;
+    write_cntv_cval(next_deadline);
 }

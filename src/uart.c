@@ -64,8 +64,15 @@ void uart_printf(const char *fmt, ...)
             break;
         case 'l':
             fmt++;
-            if (*fmt == 'u')
+            if (*fmt == 'u') {
                 print_unsigned(va_arg(ap, uint64_t), 10, width);
+            } else if (*fmt == 'd') {
+                int64_t v = va_arg(ap, int64_t);
+                if (v < 0) { uart_putc('-'); v = -v; }
+                print_unsigned((uint64_t)v, 10, width);
+            } else if (*fmt == 'x') {
+                print_unsigned(va_arg(ap, uint64_t), 16, width);
+            }
             break;
         case 'x':
             print_unsigned(va_arg(ap, unsigned int), 16, width);
