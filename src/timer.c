@@ -54,3 +54,8 @@ void vClearTickInterrupt(void)
         next_deadline = now + timer_interval;
     write_cntv_cval(next_deadline);
 }
+
+uint64_t timer_last_deadline(void)
+{
+    return next_deadline;
+}
