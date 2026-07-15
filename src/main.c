@@ -22,11 +22,6 @@ static inline uint64_t read_cntfrq(void)
     return v;
 }
 
-static inline uint64_t counts_to_us(uint64_t counts)
-{
-    return counts * 1000000ULL / cntfrq;
-}
-
 void vApplicationIRQHandler(uint32_t ulICCIAR)
 {
     uint32_t irq = ulICCIAR & 0x3FF;
@@ -36,43 +31,63 @@ void vApplicationIRQHandler(uint32_t ulICCIAR)
     }
 }
 
-static void vTaskBenchmark(void *pvParameters)
-{
-    uint32_t id = (uint32_t)(uintptr_t)pvParameters;
-    const TickType_t delay_ticks = pdMS_TO_TICKS(1000);
-    const uint64_t expected_us = 1000000ULL / configTICK_RATE_HZ * delay_ticks;
+static volatile uint64_t tick_min = UINT64_MAX;
+static volatile uint64_t tick_max;
+static volatile uint64_t tick_sum;
+static volatile uint32_t tick_count;
 
-    uint64_t prev = read_cntvct();
-    uint64_t min_us = UINT64_MAX, max_us = 0, sum_us = 0;
-    uint32_t count = 0;
+void vApplicationTickHook(void)
+{
+    static uint64_t last;
+    uint64_t now = read_cntvct();
+
+    if (last == 0) {
+        last = now;
+        return;
+    }
+
+    uint64_t delta = now - last;
+    last = now;
+    tick_count++;
+
+    if (delta < tick_min) tick_min = delta;
+    if (delta > tick_max) tick_max = delta;
+    tick_sum += delta;
+
+    if (tick_count <= 10) {
+        uart_printf("[tick %u] delta=%lu\n", tick_count, (unsigned long)delta);
+    }
+}
+
+static void vTaskReport(void *pvParameters)
+{
+    (void)pvParameters;
+    uint64_t expected = cntfrq / configTICK_RATE_HZ;
+
+    uart_printf("[timer] expected delta = %lu counts (%lu us)\n",
+                (unsigned long)expected,
+                (unsigned long)(expected * 1000000ULL / cntfrq));
 
     for (;;) {
-        vTaskDelay(delay_ticks);
-        count++;
+        vTaskDelay(pdMS_TO_TICKS(5000));
 
-        uint64_t now = read_cntvct();
-        uint64_t elapsed_us = counts_to_us(now - prev);
-        prev = now;
+        uint32_t n = tick_count;
+        if (n == 0) continue;
 
-        if (elapsed_us < min_us) min_us = elapsed_us;
-        if (elapsed_us > max_us) max_us = elapsed_us;
-        sum_us += elapsed_us;
+        uint64_t avg = tick_sum / n;
+        int64_t avg_err = (int64_t)avg - (int64_t)expected;
+        int64_t min_err = (int64_t)tick_min - (int64_t)expected;
+        int64_t max_err = (int64_t)tick_max - (int64_t)expected;
+        uint64_t jitter = tick_max - tick_min;
 
-        int64_t drift_us = (int64_t)elapsed_us - (int64_t)expected_us;
-
-        if (count <= 5 || count % 50 == 0) {
-            uint64_t avg_us = sum_us / count;
-            int64_t avg_drift = (int64_t)avg_us - (int64_t)expected_us;
-            uart_printf("[Task %u] #%u  actual=%lu us  drift=%ld us  "
-                        "min=%lu max=%lu avg=%lu avg_drift=%ld\n",
-                        id, count,
-                        (unsigned long)elapsed_us,
-                        (long)drift_us,
-                        (unsigned long)min_us,
-                        (unsigned long)max_us,
-                        (unsigned long)avg_us,
-                        (long)avg_drift);
-        }
+        uart_printf("[timer] n=%u  avg=%lu(%ld)  min=%lu(%ld)  max=%lu(%ld)  "
+                    "jitter=%lu  jitter_us=%lu\n",
+                    n,
+                    (unsigned long)avg, (long)avg_err,
+                    (unsigned long)tick_min, (long)min_err,
+                    (unsigned long)tick_max, (long)max_err,
+                    (unsigned long)jitter,
+                    (unsigned long)(jitter * 1000000ULL / cntfrq));
     }
 }
 
@@ -97,7 +112,7 @@ void free(void *ptr) { (void)ptr; }
 int main(void)
 {
     uart_init();
-    uart_puts("\n[FreeRTOS] Booting on kvmm (AArch64 EL1)\n");
+    uart_puts("\n[FreeRTOS] Timer precision test\n");
 
     cntfrq = read_cntfrq();
     uart_printf("[FreeRTOS] CNTFRQ = %lu Hz\n", (unsigned long)cntfrq);
@@ -105,18 +120,11 @@ int main(void)
     timer_init();
     gic_init();
 
-    uart_printf("[FreeRTOS] Tick rate = %u Hz, delay = %u ticks (expect %lu us)\n",
-                configTICK_RATE_HZ,
-                (unsigned)pdMS_TO_TICKS(1000),
-                (unsigned long)(1000000ULL / configTICK_RATE_HZ * pdMS_TO_TICKS(1000)));
-
-    xTaskCreate(vTaskBenchmark, "Bench0", 1024, (void *)0, 2, NULL);
-    xTaskCreate(vTaskBenchmark, "Bench1", 1024, (void *)1, 2, NULL);
+    xTaskCreate(vTaskReport, "Report", 1024, NULL, 2, NULL);
 
     uart_puts("[FreeRTOS] Starting scheduler...\n");
     vTaskStartScheduler();
 
-    uart_puts("[FreeRTOS] ERROR: scheduler returned!\n");
     for (;;)
         __asm volatile ("wfi");
 }

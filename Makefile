@@ -8,6 +8,9 @@ KERNEL  := /tmp/FreeRTOS-Kernel
 PORT    := $(KERNEL)/portable/GCC/ARM_AARCH64
 HEAP    := $(KERNEL)/portable/MemMang
 
+MEM_BASE := 0x70000000
+RAM_ORIGIN = $(shell printf "0x%x" $$(( $(MEM_BASE) + 0x800000 )))
+
 CFLAGS  := -mcpu=cortex-a53 -nostdlib -nostartfiles -ffreestanding \
            -O2 -Wall -Wextra -Wno-unused-parameter \
            -DGUEST -DQEMU \
@@ -76,7 +79,7 @@ build/vectors.o: src/vectors.S | build
 	$(AS) $(AFLAGS) -c $< -o $@
 
 $(TARGET).elf: $(OBJS)
-	$(LD) -T freertos.lds -o $@ $(OBJS)
+	$(LD) -T freertos.lds --defsym=__ram_origin=$(RAM_ORIGIN) -o $@ $(OBJS)
 
 $(TARGET).bin: $(TARGET).elf
 	$(OBJCOPY) -O binary $< $@
