@@ -28,6 +28,17 @@ static inline uint64_t counts_to_ns(uint64_t c)
     return c * 1000000000ULL / cntfrq;
 }
 
+static void system_off(void)
+{
+    register uint64_t x0 __asm("x0") = 0x84000008ULL;
+
+    __asm volatile ("hvc #0" : "+r"(x0) :: "memory");
+    __asm volatile ("smc #0" : "+r"(x0) :: "memory");
+
+    for (;;)
+        __asm volatile ("wfi");
+}
+
 /* ── Statistics collector ── */
 
 struct stats {
@@ -282,8 +293,7 @@ static void vTaskControl(void *p)
     stats_print("Sem Shuffle", &sem_stats);
 
     uart_puts("\n===== Done =====\n");
-    for (;;)
-        vTaskSuspend(NULL);
+    system_off();
 }
 
 /* ── Hooks & stubs ── */

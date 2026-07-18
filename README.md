@@ -111,3 +111,21 @@ Extending to multi-core requires a custom FreeRTOS SMP port:
 - Secondary CPU startup via PSCI `CPU_ON` (SMC `0xC4000003`)
 
 The VMM already supports multi-vCPU (proven with Linux SMP at 4 cores).
+
+
+
+## qemu run:
+cd /home/ajax/Desktop/Project/Kernel/freertos-guest
+make clean && make MEM_BASE=0x3f880000 && cp freertos.bin freertos.qemu.bin
+运行 QEMU：
+qemu-system-aarch64 \
+    -M virt \
+    -cpu cortex-a53 \
+    -nographic \
+    -smp 1 \
+    -m 256M \
+    -kernel freertos.qemu.bin \
+    -dtb freertos.dtb
+
+## bench:
+./bench_qemu.py --rounds 10

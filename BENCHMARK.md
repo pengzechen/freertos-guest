@@ -87,6 +87,27 @@ make clean && make MEM_BASE=0x40000000
 
 并用匹配的 DTB（memory 节点 `reg = <0x00 0x40000000 ...>`）。
 
+## 多轮 QEMU Benchmark
+
+```sh
+# 跑 10 轮，自动重建 freertos.qemu.bin，保存日志/CSV/图表
+./bench_qemu.py --rounds 10
+
+# 复用已有 freertos.qemu.bin，只跑测试
+./bench_qemu.py --rounds 10 --skip-build
+```
+
+输出默认写入 `bench-results/<timestamp>/`：
+
+- `logs/round-NNN.log`：每轮 QEMU 原始输出。
+- `results.csv`：每轮每个指标的 `avg/min/max/jitter`。
+- `summary.csv` / `summary.json`：跨轮统计均值、中位数、最小/最大和标准差。
+- `benchmark-lines.png`：各指标 `avg` 和 `jitter` 随轮次变化。
+- `benchmark-boxplot.png`：各指标 `avg` 和 `jitter` 分布箱线图。
+
+脚本为 QEMU `-kernel` raw image 使用 `MEM_BASE=0x3f880000` 构建，
+使链接地址 `MEM_BASE + 0x800000` 匹配 QEMU virt 的实际加载地址 `0x40080000`。
+
 ## 指标解读
 
 ### kvmm vs bare QEMU 预期差异
