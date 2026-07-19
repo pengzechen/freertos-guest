@@ -47,7 +47,7 @@ K_SRCS  := $(KERNEL)/tasks.c \
 K_ASM   := $(PORT)/portASM.S
 
 # BSP sources
-B_SRCS  := src/main.c src/uart.c src/gic.c src/timer.c src/string.c
+B_SRCS  := src/main.c src/uart.c src/gic.c src/timer.c src/string.c src/virtio_net.c
 B_ASM   := src/startup.S src/vectors.S
 
 OBJS    := $(patsubst %.c,build/%.o,$(notdir $(K_SRCS) $(B_SRCS))) \
@@ -87,6 +87,8 @@ build/gic.o: src/gic.c | build
 build/timer.o: src/timer.c | build
 	$(CC) $(CFLAGS) -c $< -o $@
 build/string.o: src/string.c | build
+	$(CC) $(CFLAGS) -c $< -o $@
+build/virtio_net.o: src/virtio_net.c | build
 	$(CC) $(CFLAGS) -c $< -o $@
 build/startup.o: src/startup.S | build
 	$(AS) $(AFLAGS) -c $< -o $@
