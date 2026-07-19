@@ -25,7 +25,7 @@ src/
   startup.S          EL1 entry: set stack, clear BSS, call main()
   vectors.S          EL1 exception vector table → FreeRTOS IRQ/SWI handlers
   main.c             IRQ dispatch (PPI 27 → tick), 4 demo tasks, hooks
-  gic.c / gic.h      GICv2 distributor + CPU interface init/enable/ack/eoi
+  gic.c / gic.h      GICv2 or GICv3 init/enable/ack/eoi
   timer.c / timer.h  CNTV generic timer: 100 Hz tick setup and re-arm
   uart.c / uart.h    PL011 polled TX with mini printf
   string.c           Freestanding memset/memcpy/memcmp
@@ -46,12 +46,15 @@ Makefile             Cross-build with aarch64-linux-musl-gcc
 
 ```
 make            # → freertos.bin (~35 KB)
+make GIC_VERSION=3
 make clean
 ```
 
 The FreeRTOS-Kernel is compiled with `-DGUEST` which activates the EL1 path
-in `portable/GCC/ARM_AARCH64` (uses `SPSR_EL1`/`ELR_EL1`/`VBAR_EL1` instead
-of EL3 registers).
+(uses `SPSR_EL1`/`ELR_EL1`/`VBAR_EL1` instead of EL3 registers). The default
+`GIC_VERSION=2` build uses the `ARM_AARCH64` port with the GICv2 MMIO CPU
+interface. `GIC_VERSION=3` uses the `ARM_AARCH64_SRE` port so IRQ ack/EOI use
+the GICv3 system register CPU interface (`ICC_IAR1_EL1` / `ICC_EOIR1_EL1`).
 
 ## Deploy & Boot
 
@@ -126,6 +129,21 @@ qemu-system-aarch64 \
     -m 256M \
     -kernel freertos.qemu.bin \
     -dtb freertos.dtb
+
+## qemu run, GICv3:
+cd /home/ajax/Desktop/Project/Kernel/freertos-guest
+make clean && make MEM_BASE=0x3f880000 GIC_VERSION=3 && cp freertos.bin freertos.gicv3.qemu.bin
+qemu-system-aarch64 -M virt,gic-version=3,dumpdtb=freertos-gicv3.dtb \
+    -cpu cortex-a53 -nographic -smp 1 -m 256M \
+    -kernel freertos.gicv3.qemu.bin
+qemu-system-aarch64 \
+    -M virt,gic-version=3 \
+    -cpu cortex-a53 \
+    -nographic \
+    -smp 1 \
+    -m 256M \
+    -kernel freertos.gicv3.qemu.bin \
+    -dtb freertos-gicv3.dtb
 
 ## bench:
 ./bench_qemu.py --rounds 10

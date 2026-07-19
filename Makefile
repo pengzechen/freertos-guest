@@ -4,8 +4,18 @@ AS      := $(CROSS)gcc
 LD      := $(CROSS)ld
 OBJCOPY := $(CROSS)objcopy
 
-KERNEL  := /tmp/FreeRTOS-Kernel
+KERNEL  ?= /home/ajax/Desktop/Project/Kernel/FreeRTOS-Kernel
+GIC_VERSION ?= 2
+
+ifeq ($(GIC_VERSION),3)
+PORT    := $(KERNEL)/portable/GCC/ARM_AARCH64_SRE
+CFLAGS_EXTRA += -DGIC_VERSION=3
+else ifeq ($(GIC_VERSION),2)
 PORT    := $(KERNEL)/portable/GCC/ARM_AARCH64
+CFLAGS_EXTRA += -DGIC_VERSION=2
+else
+$(error GIC_VERSION must be 2 or 3)
+endif
 HEAP    := $(KERNEL)/portable/MemMang
 
 MEM_BASE := 0x70000000
