@@ -52,7 +52,7 @@ def build_freertos(mem_base: str) -> None:
     if result.returncode != 0:
         raise RuntimeError(result.stdout)
 
-    result = run_command(["make", f"MEM_BASE={mem_base}"], cwd=ROOT)
+    result = run_command(["make", f"MEM_BASE={mem_base}", "KVMM=y"], cwd=ROOT)
     if result.returncode != 0:
         raise RuntimeError(result.stdout)
 

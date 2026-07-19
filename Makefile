@@ -11,12 +11,17 @@ HEAP    := $(KERNEL)/portable/MemMang
 MEM_BASE := 0x70000000
 RAM_ORIGIN = $(shell printf "0x%x" $$(( $(MEM_BASE) + 0x800000 )))
 
+ifeq ($(KVMM),y)
+CFLAGS_EXTRA += -DKVMM
+endif
+
 CFLAGS  := -mcpu=cortex-a53 -nostdlib -nostartfiles -ffreestanding \
-           -O2 -Wall -Wextra -Wno-unused-parameter \
-           -DGUEST -DQEMU \
-           -I src \
-           -I $(KERNEL)/include \
-           -I $(PORT)
+            -O2 -Wall -Wextra -Wno-unused-parameter \
+            -DGUEST -DQEMU \
+            -I src \
+            -I $(KERNEL)/include \
+            -I $(PORT) \
+            $(CFLAGS_EXTRA)
 
 AFLAGS  := $(CFLAGS) -D__ASSEMBLY__
 

@@ -30,10 +30,17 @@ static inline uint64_t counts_to_ns(uint64_t c)
 
 static void system_off(void)
 {
+#ifdef KVMM
+    register uint64_t x0 __asm("x0") = 0;
+    register uint64_t x1 __asm("x1") = 1;
+
+    __asm volatile ("hvc #0" : "+r"(x0), "+r"(x1) :: "memory");
+#else
     register uint64_t x0 __asm("x0") = 0x84000008ULL;
 
     __asm volatile ("hvc #0" : "+r"(x0) :: "memory");
     __asm volatile ("smc #0" : "+r"(x0) :: "memory");
+#endif
 
     for (;;)
         __asm volatile ("wfi");
