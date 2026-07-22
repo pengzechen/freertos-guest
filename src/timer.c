@@ -2,9 +2,14 @@
 #include "gic.h"
 #include "FreeRTOS.h"
 
-#define PPI_VTIMER  27
+#ifndef TIMER_PPI
+#define TIMER_PPI 30
+#endif
 
-static uint64_t timer_interval;
+static uint64_t timer_interval_counts;
+#if TIMER_PPI == 30
+static uint64_t timer_interval_ns;
+#endif
 static uint64_t next_deadline;
 
 static inline uint64_t read_cntfrq(void)
@@ -21,38 +26,63 @@ static inline uint64_t read_cntvct(void)
     return val;
 }
 
-static inline void write_cntv_cval(uint64_t val)
+#if TIMER_PPI == 30
+static inline void write_timer_tval(uint64_t val)
+{
+    __asm volatile ("msr cntp_tval_el0, %0" :: "r"(val));
+}
+
+static inline void write_timer_ctl(uint32_t val)
+{
+    __asm volatile ("msr cntp_ctl_el0, %0" :: "r"((uint64_t)val));
+}
+#elif TIMER_PPI == 27
+static inline void write_timer_cval(uint64_t val)
 {
     __asm volatile ("msr cntv_cval_el0, %0" :: "r"(val));
 }
 
-static inline void write_cntv_ctl(uint32_t val)
+static inline void write_timer_ctl(uint32_t val)
 {
     __asm volatile ("msr cntv_ctl_el0, %0" :: "r"((uint64_t)val));
 }
+#else
+#error "TIMER_PPI must be 27 or 30"
+#endif
 
 void timer_init(void)
 {
     uint64_t freq = read_cntfrq();
-    timer_interval = freq / configTICK_RATE_HZ;
+    timer_interval_counts = freq / configTICK_RATE_HZ;
+#if TIMER_PPI == 30
+    timer_interval_ns = timer_interval_counts * 1000000000ULL / freq;
+#endif
 }
 
 void vSetupTickInterrupt(void)
 {
-    gic_enable_irq(PPI_VTIMER);
+    gic_enable_irq(TIMER_PPI);
 
-    next_deadline = read_cntvct() + timer_interval;
-    write_cntv_cval(next_deadline);
-    write_cntv_ctl(1);
+    next_deadline = read_cntvct() + timer_interval_counts;
+#if TIMER_PPI == 30
+    write_timer_tval(timer_interval_ns);
+#else
+    write_timer_cval(next_deadline);
+#endif
+    write_timer_ctl(1);
 }
 
 void vClearTickInterrupt(void)
 {
-    next_deadline += timer_interval;
+    next_deadline += timer_interval_counts;
     uint64_t now = read_cntvct();
     if ((int64_t)(next_deadline - now) <= 0)
-        next_deadline = now + timer_interval;
-    write_cntv_cval(next_deadline);
+        next_deadline = now + timer_interval_counts;
+#if TIMER_PPI == 30
+    write_timer_tval(timer_interval_ns);
+#else
+    write_timer_cval(next_deadline);
+#endif
 }
 
 uint64_t timer_last_deadline(void)

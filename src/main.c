@@ -7,6 +7,10 @@
 
 extern void FreeRTOS_Tick_Handler(void);
 
+#ifndef TIMER_PPI
+#define TIMER_PPI 30
+#endif
+
 static uint64_t cntfrq;
 
 static inline uint64_t read_cntvct(void)
@@ -170,9 +174,9 @@ static void vTaskPreLow(void *p)
  * Measured inside vApplicationIRQHandler (before FreeRTOS_Tick_Handler
  * increments next_deadline).
  *
- * IRQ latency  = cntvct_now − timer_deadline
+ * IRQ latency  = cntvct_now - timer_deadline
  *   (timer fire → ISR entry; for kvmm includes VM exit/entry)
- * Tick delta   = cntvct_now − cntvct_prev_isr
+ * Tick delta   = cntvct_now - cntvct_prev_isr
  *   (interval stability; ideal = CNTFRQ / TICK_RATE_HZ)
  * ──────────────────────────────────────────────────────────────────── */
 
@@ -223,7 +227,7 @@ void vApplicationIRQHandler(uint32_t ulICCIAR)
 {
     uint32_t irq = ulICCIAR & 0x3FF;
 
-    if (irq == 27) {
+    if (irq == TIMER_PPI) {
         if (irq_collecting) {
             uint64_t now = read_cntvct();
             uint64_t deadline = timer_last_deadline();

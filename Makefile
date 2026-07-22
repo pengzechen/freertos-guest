@@ -5,7 +5,8 @@ LD      := $(CROSS)ld
 OBJCOPY := $(CROSS)objcopy
 
 KERNEL  ?= /home/ajax/Desktop/Project/Kernel/FreeRTOS-Kernel
-GIC_VERSION ?= 2
+GIC_VERSION ?= 3
+TIMER ?= 30
 
 ifeq ($(GIC_VERSION),3)
 PORT    := $(KERNEL)/portable/GCC/ARM_AARCH64_SRE
@@ -17,6 +18,14 @@ else
 $(error GIC_VERSION must be 2 or 3)
 endif
 HEAP    := $(KERNEL)/portable/MemMang
+
+ifeq ($(TIMER),30)
+CFLAGS_EXTRA += -DTIMER_PPI=30
+else ifeq ($(TIMER),27)
+CFLAGS_EXTRA += -DTIMER_PPI=27
+else
+$(error TIMER must be 27 or 30)
+endif
 
 MEM_BASE := 0x70000000
 RAM_ORIGIN = $(shell printf "0x%x" $$(( $(MEM_BASE) + 0x800000 )))
