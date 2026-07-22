@@ -82,10 +82,134 @@ static QUEUE_ALIGN struct vring_desc tx_desc[QUEUE_SIZE];
 static QUEUE_ALIGN struct vring_avail tx_avail;
 static QUEUE_ALIGN struct vring_used tx_used;
 static QUEUE_ALIGN uint8_t rx_buf[128];
-static QUEUE_ALIGN uint8_t tx_buf[64];
+static QUEUE_ALIGN uint8_t tx_buf[128];
 
 static int virtio_net_present;
 static volatile uint32_t virtio_net_irq_count;
+
+static const uint8_t guest_mac[6] = { 0x02, 0x58, 0x4b, 0x09, 0x0a, 0x0b };
+static const uint8_t guest_ip[4] = { 10, 0, 2, 16 };
+static const uint8_t host_ip[4] = { 10, 0, 2, 2 };
+
+static void put_be16(uint8_t *p, uint16_t val)
+{
+    p[0] = (uint8_t)(val >> 8);
+    p[1] = (uint8_t)val;
+}
+
+static uint16_t checksum16(const uint8_t *buf, uint32_t len)
+{
+    uint32_t sum = 0;
+
+    while (len > 1) {
+        sum += ((uint16_t)buf[0] << 8) | buf[1];
+        buf += 2;
+        len -= 2;
+    }
+    if (len != 0)
+        sum += (uint16_t)buf[0] << 8;
+
+    while ((sum >> 16) != 0)
+        sum = (sum & 0xffffU) + (sum >> 16);
+    return (uint16_t)~sum;
+}
+
+static uint16_t udp_checksum(const uint8_t *ip, const uint8_t *udp, uint16_t udp_len)
+{
+    uint32_t sum = 0;
+
+    for (uint32_t i = 12; i < 20; i += 2)
+        sum += ((uint16_t)ip[i] << 8) | ip[i + 1];
+    sum += 17U;
+    sum += udp_len;
+
+    for (uint32_t i = 0; i + 1 < udp_len; i += 2)
+        sum += ((uint16_t)udp[i] << 8) | udp[i + 1];
+    if ((udp_len & 1U) != 0)
+        sum += (uint16_t)udp[udp_len - 1] << 8;
+
+    while ((sum >> 16) != 0)
+        sum = (sum & 0xffffU) + (sum >> 16);
+    return (uint16_t)~sum;
+}
+
+static uint16_t get_be16(const uint8_t *p)
+{
+    return ((uint16_t)p[0] << 8) | p[1];
+}
+
+static uint32_t build_udp_test_frame(void)
+{
+    static const uint8_t payload[] = "hello from freertos virtio-net\n";
+    const uint16_t payload_len = sizeof(payload) - 1;
+    const uint16_t udp_len = 8U + payload_len;
+    const uint16_t ip_len = 20U + udp_len;
+    uint8_t *eth = tx_buf;
+    uint8_t *ip = tx_buf + 14;
+    uint8_t *udp = ip + 20;
+
+    for (uint32_t i = 0; i < sizeof(tx_buf); i++)
+        tx_buf[i] = 0;
+
+    for (uint32_t i = 0; i < 6; i++)
+        eth[i] = 0xff;
+    for (uint32_t i = 0; i < 6; i++)
+        eth[6 + i] = guest_mac[i];
+    eth[12] = 0x08;
+    eth[13] = 0x00;
+
+    ip[0] = 0x45;
+    ip[1] = 0x00;
+    put_be16(ip + 2, ip_len);
+    put_be16(ip + 4, 0x584b);
+    put_be16(ip + 6, 0x4000);
+    ip[8] = 64;
+    ip[9] = 17;
+    for (uint32_t i = 0; i < 4; i++)
+        ip[12 + i] = guest_ip[i];
+    for (uint32_t i = 0; i < 4; i++)
+        ip[16 + i] = host_ip[i];
+    put_be16(ip + 10, checksum16(ip, 20));
+
+    put_be16(udp + 0, 5555);
+    put_be16(udp + 2, 5555);
+    put_be16(udp + 4, udp_len);
+    for (uint32_t i = 0; i < payload_len; i++)
+        udp[8 + i] = payload[i];
+    put_be16(udp + 6, udp_checksum(ip, udp, udp_len));
+
+    return 14U + ip_len;
+}
+
+static const uint8_t *rx_udp_payload(const uint8_t *frame, uint32_t frame_len, uint32_t *payload_len)
+{
+    if (frame_len < 42U || frame[12] != 0x08 || frame[13] != 0x00)
+        return 0;
+
+    const uint8_t *ip = frame + 14;
+    if ((ip[0] >> 4) != 4 || ip[9] != 17)
+        return 0;
+
+    uint32_t ip_header_len = (ip[0] & 0x0fU) * 4U;
+    uint32_t ip_total_len = get_be16(ip + 2);
+    if (ip_header_len < 20U || ip_total_len < ip_header_len + 8U || frame_len < 14U + ip_total_len)
+        return 0;
+
+    const uint8_t *udp = ip + ip_header_len;
+    uint32_t udp_len = get_be16(udp + 4);
+    if (udp_len < 8U || udp_len > ip_total_len - ip_header_len)
+        return 0;
+    if (get_be16(udp + 2) != 5555U)
+        return 0;
+
+    *payload_len = udp_len - 8U;
+    return udp + 8;
+}
+
+static int payload_is_ok(const uint8_t *payload, uint32_t len)
+{
+    return len >= 2U && payload[0] == 'o' && payload[1] == 'k';
+}
 
 static void mmio_write64(uint32_t low_off, uint32_t high_off, uint64_t val)
 {
@@ -198,29 +322,16 @@ void virtio_net_init(void)
                 (unsigned long)accepted);
 }
 
-void virtio_net_test(void)
+int virtio_net_test(void)
 {
     if (!virtio_net_present) {
         uart_puts("[virtio-net] skip notify test\n");
-        return;
+        return 0;
     }
 
     for (uint32_t i = 0; i < sizeof(rx_buf); i++)
         rx_buf[i] = 0;
-    for (uint32_t i = 0; i < sizeof(tx_buf); i++)
-        tx_buf[i] = (uint8_t)i;
-
-    tx_buf[0] = 0xff;
-    tx_buf[1] = 0xff;
-    tx_buf[2] = 0xff;
-    tx_buf[3] = 0xff;
-    tx_buf[4] = 0xff;
-    tx_buf[5] = 0xff;
-    tx_buf[6] = 0x02;
-    tx_buf[7] = 0x58;
-    tx_buf[8] = 0x4b;
-    tx_buf[12] = 0x08;
-    tx_buf[13] = 0x00;
+    uint32_t tx_len = build_udp_test_frame();
 
     rx_desc[0].addr = (uint64_t)rx_buf;
     rx_desc[0].len = sizeof(rx_buf);
@@ -230,13 +341,13 @@ void virtio_net_test(void)
     rx_avail.idx = 1;
 
     tx_desc[0].addr = (uint64_t)tx_buf;
-    tx_desc[0].len = 60;
+    tx_desc[0].len = tx_len;
     tx_desc[0].flags = 0;
     tx_avail.ring[0] = 0;
     __asm volatile ("dmb ishst" ::: "memory");
     tx_avail.idx = 1;
 
-    uart_printf("[virtio-net] submit rx_avail.idx=%u tx_avail.idx=%u tx_desc.addr=%lx tx_len=%u\n",
+    uart_printf("[virtio-net] submit udp 10.0.2.16:5555 -> 10.0.2.2:5555 rx_avail.idx=%u tx_avail.idx=%u tx_desc.addr=%lx tx_len=%u\n",
                 rx_avail.idx, tx_avail.idx,
                 (unsigned long)tx_desc[0].addr, tx_desc[0].len);
 
@@ -254,6 +365,42 @@ void virtio_net_test(void)
                 tx_used.idx, tx_used.ring[0].len,
                 rx_used.idx, rx_used.ring[0].len,
                 rx_buf[0], rx_buf[1], rx_buf[2], rx_buf[3]);
+
+    uart_puts("[virtio-net] waiting for host reply 'ok'\n");
+    uint32_t attempt = 0;
+    for (;;) {
+        for (uint32_t i = 0; i < sizeof(rx_buf); i++)
+            rx_buf[i] = 0;
+
+        rx_desc[0].addr = (uint64_t)rx_buf;
+        rx_desc[0].len = sizeof(rx_buf);
+        rx_desc[0].flags = VRING_DESC_F_WRITE;
+        rx_avail.ring[rx_avail.idx % QUEUE_SIZE] = 0;
+        __asm volatile ("dmb ishst" ::: "memory");
+        uint16_t next_used = rx_used.idx + 1;
+        rx_avail.idx++;
+        REG32(VIRTIO_MMIO_QUEUE_NOTIFY) = 0;
+
+        for (uint32_t i = 0; i < 1000000U && rx_used.idx != next_used; i++)
+            __asm volatile ("nop");
+        __asm volatile ("dmb ishld" ::: "memory");
+
+        if (rx_used.idx == next_used) {
+            uint32_t payload_len = 0;
+            const uint8_t *payload = rx_udp_payload(rx_buf, rx_used.ring[(next_used - 1U) % QUEUE_SIZE].len, &payload_len);
+            if (payload != 0) {
+                uart_printf("[virtio-net] host payload len=%u first=%x:%x\n",
+                            payload_len, payload_len > 0 ? payload[0] : 0,
+                            payload_len > 1 ? payload[1] : 0);
+                if (payload_is_ok(payload, payload_len))
+                    return 1;
+            }
+        }
+
+        attempt++;
+        if ((attempt % 1000U) == 0)
+            uart_puts("[virtio-net] still waiting for host reply 'ok'\n");
+    }
 }
 
 int virtio_net_handle_irq(uint32_t irq)

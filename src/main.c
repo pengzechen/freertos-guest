@@ -13,6 +13,13 @@ static void idle_forever(void)
         __asm volatile ("wfi");
 }
 
+static void system_off(void)
+{
+    register uint64_t x0 __asm("x0") = 0x84000008UL;
+    __asm volatile ("hvc #0" : : "r"(x0) : "memory");
+    idle_forever();
+}
+
 void vApplicationIRQHandler(uint32_t ulICCIAR)
 {
     uint32_t irq = ulICCIAR & 0x3FF;
@@ -29,8 +36,11 @@ static void vTaskVirtioNet(void *p)
     (void)p;
 
     uart_puts("\n===== FreeRTOS virtio-net demo =====\n");
-    virtio_net_test();
-    uart_puts("\n===== Done; staying alive =====\n");
+    if (virtio_net_test()) {
+        uart_puts("\n===== Received ok; shutting down =====\n");
+        system_off();
+    }
+    uart_puts("\n===== No ok; staying alive =====\n");
     idle_forever();
 }
 
